@@ -12,7 +12,7 @@ provider "render" {
 }
 
 variable "render_api_key" {
-  description = "API key para Render (almacenada de forma segura)"
+  description = "API key para Render almacenada de forma segura"
   type        = string
 }
 
@@ -24,7 +24,7 @@ resource "render_service" "crud_backend" {
   plan   = "starter"
   branch = "main"
 
-  build_command  = "docker build -t app ."
-  start_command  = "npm start"
-  auto_deploy    = true
+  build_command = "docker build -t app ."
+  start_command = "npm start"
+  auto_deploy   = true
 }
