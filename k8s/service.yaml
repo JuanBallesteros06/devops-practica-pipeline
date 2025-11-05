@@ -7,6 +7,6 @@ spec:
     app: crud-backend
   ports:
     - protocol: TCP
-      port: 80         # puerto del servicio dentro del cluster
+      port: 80         # puerto dentro del cluster
       targetPort: 3000 # puerto del contenedor
   type: ClusterIP

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: crud-backend
-          image: crud-backend:dev
+          image: crud-backend:optimized  # imagen Docker que construiste
           ports:
             - containerPort: 3000
           resources:
