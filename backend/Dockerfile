@@ -1,15 +1,23 @@
-# ---- Stage 1: Build the application ----
-FROM node:18-alpine AS builder
+# ---------- Etapa 1: Build ----------
+FROM node:18-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build || echo "No build step defined"
 
-# ---- Stage 2: Production image ----
+# Copiamos package.json e instalamos dependencias
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copiamos el resto del código
+COPY . .
+
+# ---------- Etapa 2: Runtime ----------
 FROM node:18-alpine
 WORKDIR /app
-COPY --from=builder /app /app
-RUN npm ci --production
+
+# Copiar dependencias y código de la etapa anterior
+COPY --from=build /app /app
+
+# Exponer el puerto del backend
 EXPOSE 3000
-CMD ["npm", "start"]
+
+# Comando de inicio
+CMD ["npm", "run", "start"]

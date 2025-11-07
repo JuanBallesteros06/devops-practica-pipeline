@@ -1,16 +1,17 @@
 {
   "name": "crud-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend REST API with Express and Prometheus metrics for DevOps pipeline.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"(Aquí irían los tests)\" && exit 0",
-    "lint": "echo \"(Aquí iría eslint)\" && exit 0"
+    "test": "echo \"Running basic tests (placeholder)\" && exit 0",
+    "build": "echo \"No build step required\"",
+    "lint": "echo \"Linting placeholder (no ESLint configured)\" && exit 0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["express", "prometheus", "devops", "backend", "pipeline"],
+  "author": "Juan Camilo & Juan Sebastián Ballesteros",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "express": "^5.1.0",
