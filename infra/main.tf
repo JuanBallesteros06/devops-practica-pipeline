@@ -24,7 +24,8 @@ resource "render_service" "crud_backend" {
   plan   = "starter"
   branch = "main"
 
-  build_command = "docker build -t app ."
+  build_command = "docker build -t app ./backend"
   start_command = "npm start"
+
   auto_deploy   = true
 }

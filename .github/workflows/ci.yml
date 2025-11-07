@@ -23,18 +23,13 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('backend/package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
       - name: Install dependencies
         working-directory: backend
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: npm ci
 
       - name: Run tests
         working-directory: backend
@@ -44,12 +39,25 @@ jobs:
         working-directory: backend
         run: npm run lint
 
+  docker-and-security:
+    needs: build-and-test
+    runs-on: ubuntu-latest
 
-      # - name: Run Trivy vulnerability scanner (ejemplo)
-      #   uses: aquasecurity/trivy-action@master
-      #   with:
-      #     image-ref: 'crud-backend:dev'
-      #     format: 'table'
-      #     exit-code: '1'
-      #     ignore-unfixed: true
-      #     severity: 'CRITICAL,HIGH'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Build Docker image with BuildKit
+        working-directory: backend
+        env:
+          DOCKER_BUILDKIT: 1
+        run: docker build -t crud-backend:ci .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'crud-backend:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'

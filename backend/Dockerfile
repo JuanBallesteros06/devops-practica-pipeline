@@ -1,20 +1,15 @@
-# Imagen base ligera de Node
-FROM node:18-alpine
-
-# Carpeta de trabajo dentro del contenedor
+# ---- Stage 1: Build the application ----
+FROM node:18-alpine AS builder
 WORKDIR /app
-
-# Copiamos solo los archivos de dependencias primero (para aprovechar cache)
 COPY package*.json ./
-
-# Instalamos dependencias
-RUN npm install
-
-# Ahora copiamos el resto del código
+RUN npm ci
 COPY . .
+RUN npm run build || echo "No build step defined"
 
-# Solo informativo: el puerto donde escucha la app
+# ---- Stage 2: Production image ----
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app /app
+RUN npm ci --production
 EXPOSE 3000
-
-# Comando por defecto cuando se levanta el contenedor
 CMD ["npm", "start"]
