@@ -5,7 +5,8 @@ function App() {
   const [users, setUsers] = useState([]);
   const [name, setName] = useState('');
 
-  const API_URL = "http://localhost:3000"; // cambia luego si lo despliegas
+  const API_URL = "";
+
 
   const fetchUsers = async () => {
     const res = await fetch(`${API_URL}/users`);
