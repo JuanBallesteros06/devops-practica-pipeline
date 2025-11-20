@@ -62,8 +62,15 @@ jobs:
       - name: Deploy Blue environment (v1)
         run: |
           echo "🔵 Desplegando ambiente Blue (production)..."
+          IMAGE_LOWER=${{ needs.build.outputs.image }}
+          
           kubectl apply -f k8s/deployment-v1.yaml -n ${{ env.BLUE_NAMESPACE }}
           kubectl apply -f k8s/service.yaml -n ${{ env.BLUE_NAMESPACE }}
+          
+          # Actualizar imagen de v1 con la imagen actual
+          kubectl set image deployment/crud-backend-v1 \
+            crud-backend=$IMAGE_LOWER \
+            -n ${{ env.BLUE_NAMESPACE }}
           
           kubectl rollout status deployment/crud-backend-v1 \
             -n ${{ env.BLUE_NAMESPACE }} \
