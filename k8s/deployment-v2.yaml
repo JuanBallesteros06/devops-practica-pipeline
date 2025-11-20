@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crud-backend-v2
+  labels:
+    app: crud-backend
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crud-backend
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: crud-backend
+        version: v2
+    spec:
+      containers:
+        - name: crud-backend
+          image: ghcr.io/juanBallesteros06/devops-practica-pipeline/app:canary
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 5

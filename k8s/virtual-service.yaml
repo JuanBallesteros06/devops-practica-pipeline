@@ -1,0 +1,18 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: crud-backend-virtualservice
+spec:
+  hosts:
+    - crud.example          # Dominio que especificaste
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: crud-backend-service
+            subset: v1
+          weight: 95
+        - destination:
+            host: crud-backend-service
+            subset: v2
+          weight: 5

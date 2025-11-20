@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crud-backend-v1
+  labels:
+    app: crud-backend
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: crud-backend
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: crud-backend
+        version: v1
+    spec:
+      containers:
+        - name: crud-backend
+          image: ghcr.io/juanBallesteros06/devops-practica-pipeline/app:stable
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 5
