@@ -4,7 +4,7 @@ set -e
 echo "🚀 Promoviendo Canary a Producción..."
 
 NAMESPACE="production"
-IMAGE="${IMAGE:-ghcr.io/$GITHUB_REPOSITORY/app:$GITHUB_SHA}"
+IMAGE=$(echo "${IMAGE:-ghcr.io/$GITHUB_REPOSITORY/app:$GITHUB_SHA}" | tr '[:upper:]' '[:lower:]')
 
 echo "📦 Imagen a promover: $IMAGE"
 
