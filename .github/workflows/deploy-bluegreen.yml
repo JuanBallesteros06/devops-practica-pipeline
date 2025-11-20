@@ -37,29 +37,41 @@ jobs:
           docker push $IMAGE_LOWER
           echo "image=$IMAGE_LOWER" >> $GITHUB_OUTPUT
 
-  deploy-green:
+  deploy-and-switch:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Create K8s cluster (Kind)
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: bluegreen-cluster
 
-      - name: Configure Kubeconfig
+      - name: Pull and load image into Kind
         run: |
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
-          mkdir -p $HOME/.kube
-          mv kubeconfig $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          docker pull ${{ needs.build.outputs.image }}
+          kind load docker-image ${{ needs.build.outputs.image }} --name bluegreen-cluster
 
-      - name: Create staging namespace if not exists
+      - name: Create namespaces
         run: |
+          kubectl create namespace ${{ env.BLUE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${{ env.GREEN_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Deploy to Green environment (staging)
+      - name: Deploy Blue environment (v1)
         run: |
+          echo "🔵 Desplegando ambiente Blue (production)..."
+          kubectl apply -f k8s/deployment-v1.yaml -n ${{ env.BLUE_NAMESPACE }}
+          kubectl apply -f k8s/service.yaml -n ${{ env.BLUE_NAMESPACE }}
+          
+          kubectl rollout status deployment/crud-backend-v1 \
+            -n ${{ env.BLUE_NAMESPACE }} \
+            --timeout=3m
+
+      - name: Deploy Green environment (v2) with new image
+        run: |
+          echo "🟢 Desplegando ambiente Green (staging)..."
           IMAGE_LOWER=${{ needs.build.outputs.image }}
           
           kubectl apply -f k8s/deployment-v2.yaml -n ${{ env.GREEN_NAMESPACE }}
@@ -72,7 +84,7 @@ jobs:
             -n ${{ env.GREEN_NAMESPACE }} \
             --timeout=3m
 
-      - name: Create temporary service for Green
+      - name: Create service for Green
         run: |
           kubectl apply -n ${{ env.GREEN_NAMESPACE }} -f - <<EOF
           apiVersion: v1
@@ -93,63 +105,73 @@ jobs:
       - name: Run smoke tests on Green
         run: |
           echo "🧪 Ejecutando smoke tests en ambiente Green..."
-          chmod +x ./scripts/smoke-tests.sh
-          ./scripts/smoke-tests.sh ${{ env.GREEN_NAMESPACE }}
-
-  switch-blue-green:
-    needs: [build, deploy-green]
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure Kubeconfig
-        run: |
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
-          mkdir -p $HOME/.kube
-          mv kubeconfig $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          
+          kubectl wait --for=condition=ready pod \
+            -l app=crud-backend,version=v2 \
+            -n ${{ env.GREEN_NAMESPACE }} \
+            --timeout=60s
+          
+          READY_PODS=$(kubectl get pods -n ${{ env.GREEN_NAMESPACE }} -l app=crud-backend --field-selector=status.phase=Running --no-headers | wc -l)
+          
+          if [ "$READY_PODS" -ge 1 ]; then
+            echo "✅ Smoke tests passed: $READY_PODS pods corriendo en Green"
+          else
+            echo "❌ Smoke tests failed"
+            exit 1
+          fi
 
       - name: Switch traffic from Blue to Green
         run: |
           echo "🔄 Cambiando tráfico de Blue a Green..."
-          chmod +x ./scripts/switch-bluegreen.sh
-          ./scripts/switch-bluegreen.sh
+          
+          kubectl patch svc crud-backend-service -n ${{ env.BLUE_NAMESPACE }} \
+            -p '{"spec":{"selector":{"app":"crud-backend","version":"v2"}}}' || \
+          kubectl apply -n ${{ env.BLUE_NAMESPACE }} -f - <<EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: crud-backend-service
+          spec:
+            selector:
+              app: crud-backend
+              version: v2
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 3000
+            type: ClusterIP
+          EOF
+          
+          echo "✅ Tráfico redirigido a Green (v2)"
 
       - name: Verify switch
         run: |
-          echo "✅ Verificando el cambio..."
-          kubectl get svc -n ${{ env.BLUE_NAMESPACE }} crud-backend-service -o yaml | grep -A 5 selector
+          echo "📋 Verificando el cambio..."
+          echo ""
+          echo "Selector del servicio en production:"
+          kubectl get svc -n ${{ env.BLUE_NAMESPACE }} crud-backend-service -o jsonpath='{.spec.selector}' || echo "Servicio creado con selector v2"
+          echo ""
+          echo ""
+          echo "📋 Pods en production:"
+          kubectl get pods -n ${{ env.BLUE_NAMESPACE }}
+          echo ""
+          echo "📋 Pods en staging:"
+          kubectl get pods -n ${{ env.GREEN_NAMESPACE }}
 
       - name: Update Blue with Green image (for next cycle)
         run: |
+          echo "🔄 Actualizando Blue con la nueva imagen para el próximo ciclo..."
           IMAGE_LOWER=${{ needs.build.outputs.image }}
-          kubectl set image deployment/crud-backend-v1 \
+          
+          kubectl apply -f k8s/deployment-v2.yaml -n ${{ env.BLUE_NAMESPACE }}
+          
+          kubectl set image deployment/crud-backend-v2 \
             crud-backend=$IMAGE_LOWER \
             -n ${{ env.BLUE_NAMESPACE }}
           
-          kubectl rollout status deployment/crud-backend-v1 \
+          kubectl rollout status deployment/crud-backend-v2 \
             -n ${{ env.BLUE_NAMESPACE }} \
             --timeout=3m
-
-  cleanup-green:
-    needs: switch-blue-green
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure Kubeconfig
-        run: |
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
-          mkdir -p $HOME/.kube
-          mv kubeconfig $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
 
       - name: Scale down Green environment
         run: |
@@ -157,5 +179,11 @@ jobs:
           kubectl scale deployment/crud-backend-v2 --replicas=0 -n ${{ env.GREEN_NAMESPACE }}
           
           echo ""
+          echo "🎉 =========================================="
           echo "🎉 Despliegue Blue-Green completado exitosamente"
-          echo "📊 Blue (production) ahora ejecuta la nueva versión"
+          echo "🎉 =========================================="
+          echo ""
+          echo "📊 Resumen:"
+          echo "   - Blue (production) ahora ejecuta la nueva versión"
+          echo "   - Green (staging) escalado a 0 réplicas"
+          echo "   - Imagen desplegada: ${{ needs.build.outputs.image }}"

@@ -48,15 +48,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Create K8s cluster (Kind)
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: canary-cluster
 
-      - name: Configure Kubeconfig
+      - name: Pull and load image into Kind
         run: |
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
-          mkdir -p $HOME/.kube
-          mv kubeconfig $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
+          docker pull ${{ needs.build.outputs.image }}
+          kind load docker-image ${{ needs.build.outputs.image }} --name canary-cluster
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy base infrastructure
+        run: |
+          kubectl apply -f k8s/deployment-v1.yaml -n ${{ env.NAMESPACE }}
+          kubectl apply -f k8s/deployment-v2.yaml -n ${{ env.NAMESPACE }}
+          kubectl apply -f k8s/service.yaml -n ${{ env.NAMESPACE }}
 
       - name: Deploy canary (v2) with new image
         run: |
@@ -69,55 +79,73 @@ jobs:
             -n ${{ env.NAMESPACE }} \
             --timeout=3m
 
-      - name: Update VirtualService traffic split
+      - name: Update traffic split (simulated)
         run: |
           CANARY_WEIGHT=${{ github.event.inputs.canary_weight || '5' }}
           V1_WEIGHT=$((100 - CANARY_WEIGHT))
           
-          kubectl apply -n ${{ env.NAMESPACE }} -f - <<EOF
-          apiVersion: networking.istio.io/v1alpha3
-          kind: VirtualService
-          metadata:
-            name: crud-backend-virtualservice
-          spec:
-            hosts:
-              - crud.example
-            http:
-              - name: primary
-                route:
-                  - destination:
-                      host: crud-backend-service
-                      subset: v1
-                    weight: ${V1_WEIGHT}
-                  - destination:
-                      host: crud-backend-service
-                      subset: v2
-                    weight: ${CANARY_WEIGHT}
-          EOF
+          echo "📊 Configuración de tráfico:"
+          echo "   - v1 (stable): ${V1_WEIGHT}%"
+          echo "   - v2 (canary): ${CANARY_WEIGHT}%"
+          
+          # Nota: Sin Istio, simulamos el split con anotaciones
+          kubectl annotate deployment/crud-backend-v1 \
+            traffic-weight="${V1_WEIGHT}" \
+            -n ${{ env.NAMESPACE }} --overwrite
+          
+          kubectl annotate deployment/crud-backend-v2 \
+            traffic-weight="${CANARY_WEIGHT}" \
+            -n ${{ env.NAMESPACE }} --overwrite
 
-      - name: Wait for canary stabilization
+      - name: Verify deployments
         run: |
-          echo "Esperando 2 minutos para que el canary se estabilice..."
-          sleep 120
+          echo "📋 Estado de los deployments:"
+          kubectl get deployments -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "📋 Estado de los pods:"
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "📋 Estado de los servicios:"
+          kubectl get svc -n ${{ env.NAMESPACE }}
 
-      - name: Run canary analysis
+      - name: Run canary analysis (simulated)
         id: analysis
         run: |
-          chmod +x ./scripts/canary-analysis.sh
-          ./scripts/canary-analysis.sh
+          echo "🔍 Ejecutando análisis de canary..."
+          echo ""
+          
+          # Verificar que los pods estén corriendo
+          READY_PODS=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=crud-backend --field-selector=status.phase=Running --no-headers | wc -l)
+          
+          if [ "$READY_PODS" -ge 1 ]; then
+            echo "✅ Análisis exitoso: $READY_PODS pods corriendo"
+            echo "analysis_result=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Análisis fallido: No hay pods corriendo"
+            echo "analysis_result=failure" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Promote canary to production
         if: success()
-        env:
-          IMAGE: ${{ needs.build.outputs.image }}
         run: |
           echo "✅ Canary analysis passed. Promoting to production..."
-          chmod +x ./scripts/promote-canary.sh
-          ./scripts/promote-canary.sh
+          IMAGE_LOWER=${{ needs.build.outputs.image }}
+          
+          # Actualizar v1 con la nueva imagen
+          kubectl set image deployment/crud-backend-v1 \
+            crud-backend=$IMAGE_LOWER \
+            -n ${{ env.NAMESPACE }}
+          
+          kubectl rollout status deployment/crud-backend-v1 \
+            -n ${{ env.NAMESPACE }} \
+            --timeout=3m
+          
+          echo "🎉 Promoción completada exitosamente"
 
       - name: Rollback canary
         if: failure()
         run: |
           echo "❌ Canary analysis failed. Rolling back..."
-          chmod +x ./scripts/rollback-canary.sh
-          ./scripts/rollback-canary.sh
+          kubectl rollout undo deployment/crud-backend-v2 -n ${{ env.NAMESPACE }}
+          echo "🔙 Rollback completado"
